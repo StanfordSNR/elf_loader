@@ -62,7 +62,7 @@ Program *read_file(char *filename, map<string, func> *func_map){
 	fread(namestrs, prog->sheader[header.e_shstrndx].sh_size, 1, file);
 	
 	for (int i = 0; i < header.e_shnum; i++) {
-		printf("S[%d] sh_offset:%lx sh_name:%s\n", i, prog->sheader[i].sh_offset, namestrs+prog->sheader[i].sh_name);
+		printf("S[%d] sh_offset:%lx sh_name:%s sh_addralign:%lx\n", i, prog->sheader[i].sh_offset, namestrs+prog->sheader[i].sh_name, prog->sheader[i].sh_addralign);
 		
 		// Allocate code block for .text section
 		if(string(namestrs+prog->sheader[i].sh_name) == ".text") {
@@ -90,6 +90,7 @@ Program *read_file(char *filename, map<string, func> *func_map){
 			bss_idx = i;
 		}
 
+		// Process symbol table
 		if(prog->sheader[i].sh_type == SHT_SYMTAB) {
 			// Load symbol table
 			fseek(file, prog->sheader[i].sh_offset, SEEK_SET);
@@ -140,6 +141,7 @@ Program *read_file(char *filename, map<string, func> *func_map){
 			}
 		}
 
+		// Load relocation table
 		if(prog->sheader[i].sh_type == SHT_RELA || prog->sheader[i].sh_type == SHT_REL) {
 			if(string(namestrs+prog->sheader[i].sh_name) == ".rela.text") {
 				prog->reloctb = (Elf64_Rela *)malloc(prog->sheader[i].sh_size);
@@ -158,6 +160,16 @@ Program *read_file(char *filename, map<string, func> *func_map){
 		}
 	}
 	
+	// Step 3.0: Assign .bss section
+	prog->bss = calloc(bss_size + com_size, 1);
+	
+	// Step 3.1: Update symbol table entry for *COM*
+	uint64_t com_base = bss_size;
+	for (auto &com_sym : com_symtb_entry) {
+		com_sym->st_value = com_base;
+		com_base += com_sym->st_size;
+	}		
+
 	free(namestrs);	
 	free(pheader);
 	fclose(file);

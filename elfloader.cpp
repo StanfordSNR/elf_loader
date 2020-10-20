@@ -3,6 +3,13 @@
 #include "elfloader.hpp"
 #include "wasm-rt/wasm-rt.h"
 
+#define DEBUG 0
+#if DEBUG
+#define DEBUGPRINT printf
+#else
+#define DEBUGPRINT(...) do {} while (0)
+#endif
+
 void *read_object_file(char *filename, size_t code_size) {
 	void *buffer;
 	int rc = posix_memalign(&buffer, getpagesize(), code_size);
@@ -21,7 +28,7 @@ void *read_object_file(char *filename, size_t code_size) {
 
 
 Program *read_file(char *filename, map<string, func> *func_map){
-	printf("Loading object file %s\n", filename);
+	DEBUGPRINT("Loading object file %s\n", filename);
 	Program *prog = new Program();
 	prog->reloctb_size = 0;
 
@@ -48,7 +55,7 @@ Program *read_file(char *filename, map<string, func> *func_map){
 	fread(pheader, pheader_size, 1, file);
 
 	for (int i = 0; i < header.e_phnum; i++) {
-		printf("P[%d] Type:%d Starts:0x%lx Size:0x%lx", i, pheader[i].p_type, pheader[i].p_offset, pheader[i].p_filesz);
+		DEBUGPRINT("P[%d] Type:%d Starts:0x%lx Size:0x%lx", i, pheader[i].p_type, pheader[i].p_offset, pheader[i].p_filesz);
 	}	
 
 	// Step 2: Read section headers
@@ -63,7 +70,7 @@ Program *read_file(char *filename, map<string, func> *func_map){
 	fread(prog->namestrs, prog->sheader[header.e_shstrndx].sh_size, 1, file);
 	
 	for (int i = 0; i < header.e_shnum; i++) {
-		printf("S[%d] sh_offset:%lx sh_name:%s sh_addralign:%lx\n", i, prog->sheader[i].sh_offset, prog->namestrs+prog->sheader[i].sh_name, prog->sheader[i].sh_addralign);
+		DEBUGPRINT("S[%d] sh_offset:%lx sh_name:%s sh_addralign:%lx\n", i, prog->sheader[i].sh_offset, prog->namestrs+prog->sheader[i].sh_name, prog->sheader[i].sh_addralign);
 		
 		// Allocate code block for .text section
 		if(string(prog->namestrs+prog->sheader[i].sh_name) == ".text") {
@@ -74,7 +81,7 @@ Program *read_file(char *filename, map<string, func> *func_map){
 			if (rc != 0) {
 				fprintf(stderr, "%s", "Failed to allocate page-aligned buffer.\n");
 			}
-			printf("Assigned code block %p\n", prog->code);
+			DEBUGPRINT("Assigned code block %p\n", prog->code);
 
 			rc = mprotect(prog->code, prog->sheader[i].sh_size, PROT_EXEC|PROT_READ|PROT_WRITE);
 			if (rc != 0) {
@@ -107,13 +114,13 @@ Program *read_file(char *filename, map<string, func> *func_map){
 			
 			for (int j = 0; j < prog->sheader[i].sh_size/sizeof(Elf64_Sym); j++) {
 				if (ELF64_ST_TYPE(prog->symtb[j].st_info) == STT_SECTION) {
-					printf("Idx:%d value:%lx size:%lx st_shndx:%x\n", j, prog->symtb[j].st_value, prog->symtb[j].st_size, prog->symtb[j].st_shndx);
+					DEBUGPRINT("Idx:%d value:%lx size:%lx st_shndx:%x\n", j, prog->symtb[j].st_value, prog->symtb[j].st_size, prog->symtb[j].st_shndx);
 				}	
 				if (prog->symtb[j].st_name != 0) {
-					printf("Idx:%d Name:%s value:%lx size:%lx st_shndx:%x\n", j, prog->symstrs+ prog->symtb[j].st_name, prog->symtb[j].st_value, prog->symtb[j].st_size, prog->symtb[j].st_shndx);
+					DEBUGPRINT("Idx:%d Name:%s value:%lx size:%lx st_shndx:%x\n", j, prog->symstrs+ prog->symtb[j].st_name, prog->symtb[j].st_value, prog->symtb[j].st_size, prog->symtb[j].st_shndx);
 					// Funtion/Variable not defined
 					if (prog->symtb[j].st_shndx == SHN_UNDEF) {
-						printf("Function not defined\n");
+						DEBUGPRINT("Function not defined\n");
 						continue;
 					} 
 
@@ -125,17 +132,17 @@ Program *read_file(char *filename, map<string, func> *func_map){
 					// A function
 					if (prog->symtb[j].st_shndx == text_idx) {
 						entry.type = TEXT;
-						printf("Added function:%s at idx%ld\n", name.c_str(), entry.idx);
+						DEBUGPRINT("Added function:%s at idx%ld\n", name.c_str(), entry.idx);
 					}
 					// An .bss variable
 					else if (prog->symtb[j].st_shndx == bss_idx) {
 						entry.type = BSS;
-						printf("Added bss variable:%s at idx%ld\n", name.c_str(), entry.idx);
+						DEBUGPRINT("Added bss variable:%s at idx%ld\n", name.c_str(), entry.idx);
 					}
 					// An COM variable
 					else if (prog->symtb[j].st_shndx == SHN_COMMON) {
 						entry.type = COM;
-						printf("Added *COM* variable:%s at idx%ld\n", name.c_str(), entry.idx);
+						DEBUGPRINT("Added *COM* variable:%s at idx%ld\n", name.c_str(), entry.idx);
 						com_size += prog->symtb[j].st_size;
 						com_symtb_entry.push_back(&(prog->symtb[j]));
 					}
@@ -160,7 +167,7 @@ Program *read_file(char *filename, map<string, func> *func_map){
 		}
 
 		if(prog->sheader[i].sh_type == SHT_DYNAMIC) {
-			printf("This is a dynamic linking table.\n");
+			DEBUGPRINT("This is a dynamic linking table.\n");
 		}
 	}
 	
@@ -199,7 +206,7 @@ pair<vector<Program *>, void *> load_programs(int argc, char* argv[]){
 
 	for (auto &prog : res) {
 		for (int i = 0; i < prog->reloctb_size; i++) {
-			printf("offset:%lx index:%lx type:%lx addend:%ld\n", prog->reloctb[i].r_offset, ELF64_R_SYM(prog->reloctb[i].r_info), ELF64_R_TYPE(prog->reloctb[i].r_info), prog->reloctb[i].r_addend);
+			DEBUGPRINT("offset:%lx index:%lx type:%lx addend:%ld\n", prog->reloctb[i].r_offset, ELF64_R_SYM(prog->reloctb[i].r_info), ELF64_R_TYPE(prog->reloctb[i].r_info), prog->reloctb[i].r_addend);
 			int idx = ELF64_R_SYM(prog->reloctb[i].r_info);
 			int32_t rel_offset = prog->reloctb[i].r_addend - (int64_t)(prog->code) - prog->reloctb[i].r_offset;
 			// Check whether is a section
@@ -207,16 +214,16 @@ pair<vector<Program *>, void *> load_programs(int argc, char* argv[]){
 				string sec_name = string(prog->namestrs+prog->sheader[prog->symtb[idx].st_shndx].sh_name);
 				if (sec_name == ".text") {
 					rel_offset += (int64_t)(prog->code);
-					printf("Reloced .text section\n");
+					DEBUGPRINT("Reloced .text section\n");
 				} else if (sec_name == ".bss") {
 					rel_offset += (int64_t)(prog->bss);
-					printf("Reloced .bss section\n");
+					DEBUGPRINT("Reloced .bss section\n");
 				} else if (sec_name == ".data") {
-					printf("No .data section\n");
+					DEBUGPRINT("No .data section\n");
 				}
 			} else {		
 				string name = string(prog->symstrs + prog->symtb[idx].st_name);
-				printf("Name is %s\n", name.c_str());
+				DEBUGPRINT("Name is %s\n", name.c_str());
 				func dest = func_map[name];
 				switch (dest.type) {
 					case LIB:
@@ -232,14 +239,14 @@ pair<vector<Program *>, void *> load_programs(int argc, char* argv[]){
 				}
 			}	
 			*((int32_t *)(prog->code + prog->reloctb[i].r_offset)) = rel_offset; 
-			printf("Value is %d\n", rel_offset);
+			DEBUGPRINT("Value is %d\n", rel_offset);
 		}
 	}	
 	
 	string name = "main";
 	func dest_func = func_map[name];
-	printf("Offset is %lx size is %lx\n", dest_func.prog->symtb[dest_func.idx].st_value, dest_func.prog->symtb[dest_func.idx].st_size);
-        printf("code block at %p\n", dest_func.prog->code);
+	DEBUGPRINT("Offset is %lx size is %lx\n", dest_func.prog->symtb[dest_func.idx].st_value, dest_func.prog->symtb[dest_func.idx].st_size);
+        DEBUGPRINT("code block at %p\n", dest_func.prog->code);
 	void * entry_point = dest_func.prog->code + dest_func.prog->symtb[dest_func.idx].st_value;	
 	return std::make_pair(res, entry_point);	
 }

@@ -1,5 +1,5 @@
 trial: trial.cpp.o elfloader.cpp.o wasm-rt-impl.o
-	g++ -o trial trial.cpp.o elfloader.cpp.o wasm-rt-impl.o
+	g++ -g -o trial trial.cpp.o elfloader.cpp.o wasm-rt-impl.o
 
 trial.cpp.o: trial.cpp
 	g++ -c -o trial.cpp.o trial.cpp

@@ -59,14 +59,14 @@ Program *read_file(char *filename, map<string, func> *func_map){
 	
 	// Step 2.1: Read section header string table
 	fseek(file, prog->sheader[header.e_shstrndx].sh_offset, SEEK_SET);
-        char *namestrs = (char *)malloc(prog->sheader[header.e_shstrndx].sh_size);
-	fread(namestrs, prog->sheader[header.e_shstrndx].sh_size, 1, file);
+        prog->namestrs = (char *)malloc(prog->sheader[header.e_shstrndx].sh_size);
+	fread(prog->namestrs, prog->sheader[header.e_shstrndx].sh_size, 1, file);
 	
 	for (int i = 0; i < header.e_shnum; i++) {
-		printf("S[%d] sh_offset:%lx sh_name:%s sh_addralign:%lx\n", i, prog->sheader[i].sh_offset, namestrs+prog->sheader[i].sh_name, prog->sheader[i].sh_addralign);
+		printf("S[%d] sh_offset:%lx sh_name:%s sh_addralign:%lx\n", i, prog->sheader[i].sh_offset, prog->namestrs+prog->sheader[i].sh_name, prog->sheader[i].sh_addralign);
 		
 		// Allocate code block for .text section
-		if(string(namestrs+prog->sheader[i].sh_name) == ".text") {
+		if(string(prog->namestrs+prog->sheader[i].sh_name) == ".text") {
 			text_idx = i;
 			fseek(file, prog->sheader[i].sh_offset, SEEK_SET);
 			
@@ -85,7 +85,7 @@ Program *read_file(char *filename, map<string, func> *func_map){
 		}
 
 		// Record size of .bss section
-		if(string(namestrs+prog->sheader[i].sh_name) == ".bss") {
+		if(string(prog->namestrs+prog->sheader[i].sh_name) == ".bss") {
 			fseek(file, prog->sheader[i].sh_offset, SEEK_SET);
 			bss_size = prog->sheader[i].sh_size;
 			bss_idx = i;
@@ -106,8 +106,11 @@ Program *read_file(char *filename, map<string, func> *func_map){
 			
 			
 			for (int j = 0; j < prog->sheader[i].sh_size/sizeof(Elf64_Sym); j++) {
+				if (ELF64_ST_TYPE(prog->symtb[j].st_info) == STT_SECTION) {
+					printf("Idx:%d value:%lx size:%lx st_shndx:%x\n", j, prog->symtb[j].st_value, prog->symtb[j].st_size, prog->symtb[j].st_shndx);
+				}	
 				if (prog->symtb[j].st_name != 0) {
-					printf("Name:%s value:%lx size:%lx st_shndx:%x\n", prog->symstrs+ prog->symtb[j].st_name, prog->symtb[j].st_value, prog->symtb[j].st_size, prog->symtb[j].st_shndx);
+					printf("Idx:%d Name:%s value:%lx size:%lx st_shndx:%x\n", j, prog->symstrs+ prog->symtb[j].st_name, prog->symtb[j].st_value, prog->symtb[j].st_size, prog->symtb[j].st_shndx);
 					// Funtion/Variable not defined
 					if (prog->symtb[j].st_shndx == SHN_UNDEF) {
 						printf("Function not defined\n");
@@ -144,7 +147,7 @@ Program *read_file(char *filename, map<string, func> *func_map){
 
 		// Load relocation table
 		if(prog->sheader[i].sh_type == SHT_RELA || prog->sheader[i].sh_type == SHT_REL) {
-			if(string(namestrs+prog->sheader[i].sh_name) == ".rela.text") {
+			if(string(prog->namestrs+prog->sheader[i].sh_name) == ".rela.text") {
 				prog->reloctb = (Elf64_Rela *)malloc(prog->sheader[i].sh_size);
 				fseek(file, prog->sheader[i].sh_offset, SEEK_SET);
 				fread(prog->reloctb, prog->sheader[i].sh_size, 1, file);
@@ -171,7 +174,6 @@ Program *read_file(char *filename, map<string, func> *func_map){
 		com_base += com_sym->st_size;
 	}		
 
-	free(namestrs);	
 	free(pheader);
 	fclose(file);
 	return prog;
@@ -193,29 +195,44 @@ pair<vector<Program *>, void *> load_programs(int argc, char* argv[]){
 	func_map["wasm_rt_allocate_memory"] = func((uint64_t)wasm_rt_allocate_memory);
 	func_map["wasm_rt_grow_memory"] = func((uint64_t)wasm_rt_grow_memory);
 	func_map["wasm_rt_allocate_table"] = func((uint64_t)wasm_rt_allocate_table);
-	func_map["wasm_rt_call_stack_depth"] = func((uint64_t)wasm_rt_call_stack_depth);
+	func_map["wasm_rt_call_stack_depth"] = func((uint64_t)&wasm_rt_call_stack_depth);
 
 	for (auto &prog : res) {
 		for (int i = 0; i < prog->reloctb_size; i++) {
-			printf("offset:%lx index:%lx addend:%ld\n", prog->reloctb[i].r_offset, ELF64_R_SYM(prog->reloctb[i].r_info), prog->reloctb[i].r_addend);
+			printf("offset:%lx index:%lx type:%lx addend:%ld\n", prog->reloctb[i].r_offset, ELF64_R_SYM(prog->reloctb[i].r_info), ELF64_R_TYPE(prog->reloctb[i].r_info), prog->reloctb[i].r_addend);
 			int idx = ELF64_R_SYM(prog->reloctb[i].r_info);
-			string name = string(prog->symstrs + prog->symtb[idx].st_name);
-			func dest = func_map[name];
 			int32_t rel_offset = prog->reloctb[i].r_addend - (int64_t)(prog->code) - prog->reloctb[i].r_offset;
-			switch (dest.type) {
-				case LIB:
-					rel_offset += (int64_t)(dest.lib_addr);
-				      	break;
-				case TEXT:
-				      	rel_offset += (int64_t)(dest.prog->code) + dest.prog->symtb[dest.idx].st_value;
-			      	      	break;	     
-				case BSS:
-				case COM:
-					rel_offset += (int64_t)(dest.prog->bss) + dest.prog->symtb[dest.idx].st_value;
-					break;
+			// Check whether is a section
+			if (ELF64_ST_TYPE(prog->symtb[idx].st_info) == STT_SECTION) {
+				string sec_name = string(prog->namestrs+prog->sheader[prog->symtb[idx].st_shndx].sh_name);
+				if (sec_name == ".text") {
+					rel_offset += (int64_t)(prog->code);
+					printf("Reloced .text section\n");
+				} else if (sec_name == ".bss") {
+					rel_offset += (int64_t)(prog->bss);
+					printf("Reloced .bss section\n");
+				} else if (sec_name == ".data") {
+					printf("No .data section\n");
+				}
+			} else {		
+				string name = string(prog->symstrs + prog->symtb[idx].st_name);
+				printf("Name is %s\n", name.c_str());
+				func dest = func_map[name];
+				switch (dest.type) {
+					case LIB:
+						rel_offset += (int64_t)(dest.lib_addr);
+						break;
+					case TEXT:
+						rel_offset += (int64_t)(dest.prog->code) + dest.prog->symtb[dest.idx].st_value;
+						break;	     
+					case BSS:
+					case COM:
+						rel_offset += (int64_t)(dest.prog->bss) + dest.prog->symtb[dest.idx].st_value;
+						break;
+				}
 			}	
 			*((int32_t *)(prog->code + prog->reloctb[i].r_offset)) = rel_offset; 
-			printf("Name is %s Value is %d\n", name.c_str(), rel_offset);
+			printf("Value is %d\n", rel_offset);
 		}
 	}	
 	

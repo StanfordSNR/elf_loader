@@ -17,6 +17,7 @@ struct Program {
 	void *code;
 	void *bss;
 	char *symstrs;
+	char *namestrs;
 	Elf64_Sym *symtb;
 	int reloctb_size;
 	Elf64_Rela *reloctb;

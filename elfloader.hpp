@@ -9,13 +9,13 @@
 #define TEXT 0
 #define BSS 1
 #define COM 2
+#define LIB 3
 
 using namespace std;
 
 struct Program {
 	void *code;
 	void *bss;
-	void *com;
 	char *symstrs;
 	Elf64_Sym *symtb;
 	int reloctb_size;
@@ -27,6 +27,11 @@ struct func {
 	Program *prog;
 	uint64_t idx;
         int type;
+	uint64_t lib_addr;
+
+	func() {}
+	func (uint64_t lib_addr) : lib_addr(lib_addr),
+				   type(LIB) {}
 };
 
 pair<vector<Program *>, void*> load_programs(int argc, char *argv[]);

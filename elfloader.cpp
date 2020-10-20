@@ -1,6 +1,7 @@
 #include <iostream>
 #include <map>
 #include "elfloader.hpp"
+#include "wasm-rt/wasm-rt.h"
 
 void *read_object_file(char *filename, size_t code_size) {
 	void *buffer;
@@ -179,30 +180,42 @@ Program *read_file(char *filename, map<string, func> *func_map){
 pair<vector<Program *>, void *> load_programs(int argc, char* argv[]){
 	vector<Program *> res;
 	map<string, func> func_map;	
-
+	
+	// Step 0: Read in object files
 	for (int i = 1; i < argc; i++) {
 		Program *prog = read_file(argv[i], &func_map);
 		res.push_back(prog);
 	}
 	
+	// Step 1: Add wasm-rt functions to func_map	
+	func_map["wasm_rt_trap"] = func((uint64_t)wasm_rt_trap);		
+	func_map["wasm_rt_register_func_type"] = func((uint64_t)wasm_rt_register_func_type);
+	func_map["wasm_rt_allocate_memory"] = func((uint64_t)wasm_rt_allocate_memory);
+	func_map["wasm_rt_grow_memory"] = func((uint64_t)wasm_rt_grow_memory);
+	func_map["wasm_rt_allocate_table"] = func((uint64_t)wasm_rt_allocate_table);
+	func_map["wasm_rt_call_stack_depth"] = func((uint64_t)wasm_rt_call_stack_depth);
+
 	for (auto &prog : res) {
 		for (int i = 0; i < prog->reloctb_size; i++) {
 			printf("offset:%lx index:%lx addend:%ld\n", prog->reloctb[i].r_offset, ELF64_R_SYM(prog->reloctb[i].r_info), prog->reloctb[i].r_addend);
-			//First find local code block
 			int idx = ELF64_R_SYM(prog->reloctb[i].r_info);
-			if(ELF64_ST_TYPE(prog->symtb[idx].st_info) != STT_NOTYPE) {
-				*((int32_t *)(prog->code + prog->reloctb[i].r_offset)) = prog->symtb[idx].st_value + prog->reloctb[i].r_addend - prog->reloctb[i].r_offset;
-				printf("Value is %ld\n", prog->symtb[idx].st_value + prog->reloctb[i].r_addend - prog->reloctb[i].r_offset);
-				for (int k =0 ; k < 76; k++) {
-					printf("%x ", ((unsigned char*)prog->code)[k]);	
-				}
-			} else {
-				string name = string(prog->symstrs + prog->symtb[idx].st_name);
-				printf("Name is %s\n", name.c_str());
-				func dest_func = func_map[name];
-				printf("Offset is %lx size is %lx\n", dest_func.prog->symtb[dest_func.idx].st_value, dest_func.prog->symtb[dest_func.idx].st_size);
-				*((int32_t *)(prog->code + prog->reloctb[i].r_offset)) = (int64_t)(dest_func.prog->code) - (int64_t)(prog->code) + dest_func.prog->symtb[dest_func.idx].st_value + prog->reloctb[i].r_addend - prog->reloctb[i].r_offset;
-			}
+			string name = string(prog->symstrs + prog->symtb[idx].st_name);
+			func dest = func_map[name];
+			int32_t rel_offset = prog->reloctb[i].r_addend - (int64_t)(prog->code) - prog->reloctb[i].r_offset;
+			switch (dest.type) {
+				case LIB:
+					rel_offset += (int64_t)(dest.lib_addr);
+				      	break;
+				case TEXT:
+				      	rel_offset += (int64_t)(dest.prog->code) + dest.prog->symtb[dest.idx].st_value;
+			      	      	break;	     
+				case BSS:
+				case COM:
+					rel_offset += (int64_t)(dest.prog->bss) + dest.prog->symtb[dest.idx].st_value;
+					break;
+			}	
+			*((int32_t *)(prog->code + prog->reloctb[i].r_offset)) = rel_offset; 
+			printf("Name is %s Value is %d\n", name.c_str(), rel_offset);
 		}
 	}	
 	

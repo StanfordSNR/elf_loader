@@ -9,3 +9,6 @@ wasm2c -o $1-new.c $1.wasm
 echo 'build '$1'-new.c to '$1'-new.o';
 cp ../../wasm-rt/wasm-rt.h wasm-rt.h
 gcc -c $1-new.c 
+
+echo 'build main.c';
+gcc -c main.c

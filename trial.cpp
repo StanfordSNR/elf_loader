@@ -6,10 +6,11 @@
 
 /** Takes filename, offset of .text segment and size of .text segment*/
 int main(int argc, char* argv[]) {
-	std::pair<vector<Program *>, void*> res = load_programs(argc, argv); 	
+	Program prog = load_programs(argc, argv); 
+	prog.finish_loading_cleanup();	
         printf("Completed loading programs\n");	
 
-	int register rax asm("rax") = (u_int64_t)res.second;
+	int register rax asm("rax") = (u_int64_t)prog.entry_point;
 	int register esi asm("esi") = 13;
 	int register edi asm("edi") = 20;
 	asm("call *%rax");
@@ -17,17 +18,6 @@ int main(int argc, char* argv[]) {
 	asm("movl %%eax,%0":"=r"(i));
 	printf("The result is %d\n", i);
 	
- 	for (auto &prog : res.first) {
-		free(prog->code);
-		free(prog->bss);
-		free(prog->symstrs);
-		free(prog->namestrs);
-		free(prog->symtb);
-		if (prog->reloctb_size != 0) {
-			free(prog->reloctb);
-		}
-		free(prog->sheader);
-	}
-	
+        prog.finish_program_cleanup();	
 	return 0;
 }
